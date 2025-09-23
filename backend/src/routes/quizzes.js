@@ -29,7 +29,14 @@ router.post('/', authenticate, schemas.quizCreate, validate, ctrl.createQuiz);
  *     summary: Submit quiz responses
  *     tags: [Quizzes]
  */
-router.post('/:id/submit', authenticate, schemas.idParam.concat(schemas.quizSubmit), validate, ctrl.submitQuiz);
+router.post(
+  '/:id/submit',
+  authenticate,
+  // Combine single param validator with array of body validators
+  [schemas.idParam, ...schemas.quizSubmit],
+  validate,
+  ctrl.submitQuiz
+);
 
 /**
  * @swagger

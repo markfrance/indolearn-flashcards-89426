@@ -47,7 +47,15 @@ router.post('/', authenticate, authorize('admin'), schemas.flashcardCreate, vali
  *     summary: Update flashcard
  *     tags: [Flashcards]
  */
-router.put('/:id', authenticate, authorize('admin'), schemas.idParam.concat(schemas.flashcardUpdate), validate, ctrl.update);
+router.put(
+  '/:id',
+  authenticate,
+  authorize('admin'),
+  // Combine single param validator with array of body validators
+  [schemas.idParam, ...schemas.flashcardUpdate],
+  validate,
+  ctrl.update
+);
 
 /**
  * @swagger

@@ -4,6 +4,7 @@ This backend provides REST endpoints for authentication, users, flashcards, cate
 
 - Docs: /docs (Swagger UI)
 - Health: GET /
+- Default Port: 3001 (override with env PORT)
 
 ## Environment
 

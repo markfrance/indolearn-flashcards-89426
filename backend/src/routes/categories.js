@@ -47,7 +47,15 @@ router.post('/', authenticate, authorize('admin'), schemas.categoryCreate, valid
  *     summary: Update category
  *     tags: [Categories]
  */
-router.put('/:id', authenticate, authorize('admin'), schemas.idParam.concat(schemas.categoryUpdate), validate, ctrl.update);
+router.put(
+  '/:id',
+  authenticate,
+  authorize('admin'),
+  // Combine single param validator with array of body validators
+  [schemas.idParam, ...schemas.categoryUpdate],
+  validate,
+  ctrl.update
+);
 
 /**
  * @swagger
