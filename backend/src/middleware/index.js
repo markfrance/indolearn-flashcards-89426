@@ -1,4 +1,10 @@
-// This file will export middleware as the application grows
+/**
+ * Middleware index - export shared middleware here for easy import.
+ */
+const validate = require('./validate');
+const auth = require('./auth');
+
 module.exports = {
-  // Add your middleware here
+  validate,
+  ...auth,
 };

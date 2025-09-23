@@ -13,3 +13,6 @@ fs.writeFileSync(
   outputPath,
   JSON.stringify(swaggerSpec, null, 2)
 );
+
+// eslint-disable-next-line no-console
+console.log(`OpenAPI spec written to ${outputPath}`);
