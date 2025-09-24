@@ -16,12 +16,26 @@ Environment variables (set in your runtime, do not commit secrets):
 - HOST (default 0.0.0.0)
 - PORT (default 3001)
 
-Quick start:
-1) Set env vars
+A `.env` file is optional. The app uses `dotenv` if present but will also read variables from the runtime environment. See `.env.example` for the required keys.
+
+Quick start (local):
+1) Copy `.env.example` to `.env` and fill in values (or set variables via your shell)
 2) npm install
 3) npm start
 4) Open Swagger docs at /docs
 
+Docker:
+1) Build the image
+   docker build -t indolearn-backend .
+2) Run the container with env vars passed from host (no local .env required)
+   docker run -p 3001:3001 \
+     -e SUPABASE_URL=... \
+     -e SUPABASE_SERVICE_ROLE_KEY=... \
+     -e SITE_URL=http://localhost:3000 \
+     --name indolearn-backend indolearn-backend
+3) Open Swagger docs at http://localhost:3001/docs
+
 Security notes:
 - Never expose SERVICE_ROLE_KEY to the browser.
 - Frontend should use NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_ANON_KEY.
+- The container will start even if Supabase variables are missing, but endpoints that access Supabase will not function and will warn in logs.
