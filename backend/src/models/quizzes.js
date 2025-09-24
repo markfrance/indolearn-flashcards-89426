@@ -1,166 +1,154 @@
 'use strict';
-const db = require('../config/db');
+const { supabase } = require('../config/supabase');
 
 /**
- * Generate a quiz: pick N flashcards (due ones preferred), create MCQ choices.
+ * Helper to random sample without replacement.
+ */
+function sample(array, n) {
+  const copy = array.slice();
+  const out = [];
+  while (n-- > 0 && copy.length) {
+    const idx = Math.floor(Math.random() * copy.length);
+    out.push(copy.splice(idx, 1)[0]);
+  }
+  return out;
+}
+
+/**
+ * Generate a quiz: pick N flashcards, create MCQ choices.
  * direction: 'en_to_id' or 'id_to_en'
  */
 async function generateQuiz(userId, { size = 10, categoryId = null, direction = 'en_to_id' }) {
-  // Prefer due flashcards from spaced repetition
-  const params = [userId];
-  let categoryClause = '';
-  if (categoryId) {
-    params.push(categoryId);
-    categoryClause = ` AND f.category_id = $${params.length}`;
-  }
+  // Fetch candidate flashcards
+  let query = supabase.from('flashcards').select('id, indonesian, english').order('id', { ascending: true });
+  if (categoryId) query = query.eq('category_id', categoryId);
+  const { data: cards, error } = await query;
+  if (error) throw new Error(error.message);
 
-  // 1) get due flashcards up to size
-  const due = await db.query(
-    `SELECT f.id, f.indonesian, f.english FROM user_flashcards uf
-     JOIN flashcards f ON f.id = uf.flashcard_id
-     WHERE uf.user_id=$1 AND uf.due_at <= NOW()${categoryClause}
-     ORDER BY uf.due_at ASC
-     LIMIT ${size}`,
-    params
-  );
+  const pool = sample(cards || [], size);
 
-  let needed = size - due.rows.length;
-  let pool = due.rows;
-
-  if (needed > 0) {
-    // fill remaining with random flashcards in category (excluding ones in pool)
-    const excludeIds = pool.map(r => r.id);
-    const exclList = excludeIds.length ? `AND f.id NOT IN (${excludeIds.map((_, i) => `$${params.length + i + 1}`).join(',')})` : '';
-    const extraParams = excludeIds;
-    const randomFill = await db.query(
-      `SELECT f.id, f.indonesian, f.english
-       FROM flashcards f
-       WHERE 1=1 ${categoryId ? `AND f.category_id=$${params.indexOf(categoryId) + 1}` : ''} ${exclList}
-       ORDER BY random()
-       LIMIT ${needed}`,
-      params.concat(extraParams)
-    );
-    pool = pool.concat(randomFill.rows);
-  }
-
-  // Create a quiz record
-  const quizIns = await db.query(
-    'INSERT INTO quizzes (user_id, size, category_id, direction) VALUES ($1,$2,$3,$4) RETURNING id, created_at as "createdAt"',
-    [userId, size, categoryId, direction]
-  );
-  const quizId = quizIns.rows[0].id;
-
-  // Build questions with plausible distractors
-  const ids = pool.map(p => p.id);
-  const { rows: allChoices } = await db.query(
-    `SELECT id, indonesian, english FROM flashcards
-     WHERE id = ANY($1::int[]) OR (category_id ${categoryId ? '= $2' : 'IS NOT NULL'})`,
-    categoryId ? [ids, categoryId] : [ids]
-  );
-
+  // Build choices pool
   const questions = pool.map((card) => {
-    const correct = card;
-    // choose 3 distractors from allChoices (excluding correct)
-    const optionsPool = allChoices.filter(c => c.id !== correct.id);
-    const shuffled = optionsPool.sort(() => 0.5 - Math.random()).slice(0, 3);
-    const choices = [correct, ...shuffled].sort(() => 0.5 - Math.random());
+    const distractors = sample((cards || []).filter((c) => c.id !== card.id), 3);
+    const options = sample([card, ...distractors], 4);
     if (direction === 'en_to_id') {
       return {
-        cardId: correct.id,
-        prompt: correct.english,
-        answer: correct.indonesian,
-        choices: choices.map(c => c.indonesian),
-      };
-    } else {
-      return {
-        cardId: correct.id,
-        prompt: correct.indonesian,
-        answer: correct.english,
-        choices: choices.map(c => c.english),
+        cardId: card.id,
+        prompt: card.english,
+        answer: card.indonesian,
+        choices: options.map((o) => o.indonesian),
       };
     }
+    return {
+      cardId: card.id,
+      prompt: card.indonesian,
+      answer: card.english,
+      choices: options.map((o) => o.english),
+    };
   });
 
-  // Persist questions in quiz_attempts as pending rows
-  const insertValues = [];
-  const paramsArr = [];
-  let idx = 1;
-  questions.forEach((q) => {
-    insertValues.push(`($${idx++}, $${idx++}, $${idx++}, $${idx++})`);
-    paramsArr.push(quizId, q.cardId, q.prompt, q.answer);
-  });
+  // Persist quiz metadata
+  const { data: quiz, error: quizErr } = await supabase
+    .from('quizzes')
+    .insert({ user_id: userId, size: pool.length, category_id: categoryId, direction })
+    .select('id, created_at')
+    .single();
+  if (quizErr) throw new Error(quizErr.message);
 
-  await db.query(
-    `INSERT INTO quiz_attempts (quiz_id, flashcard_id, prompt, answer) VALUES ${insertValues.join(',')}`,
-    paramsArr
-  );
+  // Persist attempts as pending
+  const attemptRows = questions.map((q) => ({
+    quiz_id: quiz.id,
+    flashcard_id: q.cardId,
+    prompt: q.prompt,
+    answer: q.answer,
+  }));
+  if (attemptRows.length) {
+    const { error: attErr } = await supabase.from('quiz_attempts').insert(attemptRows);
+    if (attErr) throw new Error(attErr.message);
+  }
 
-  return { quizId, createdAt: quizIns.rows[0].createdAt, direction, size, questions };
+  return { quizId: quiz.id, createdAt: quiz.created_at, direction, size: pool.length, questions };
 }
 
 async function submitQuiz(userId, quizId, { responses }) {
-  // Verify quiz ownership
-  const { rows: quizzes } = await db.query('SELECT * FROM quizzes WHERE id=$1 AND user_id=$2', [quizId, userId]);
-  if (!quizzes[0]) {
+  // Ensure quiz ownership
+  const { data: quiz, error: qErr } = await supabase.from('quizzes').select('id, user_id').eq('id', quizId).single();
+  if (qErr || !quiz || quiz.user_id !== userId) {
     const err = new Error('Quiz not found');
     err.statusCode = 404;
     throw err;
   }
 
   let correctCount = 0;
-
   for (const r of responses) {
-    const { flashcardId, selected } = r;
-    const { rows } = await db.query(
-      'SELECT id, answer FROM quiz_attempts WHERE quiz_id=$1 AND flashcard_id=$2 LIMIT 1',
-      [quizId, flashcardId]
-    );
-    if (!rows[0]) continue;
-    const attemptId = rows[0].id;
-    const isCorrect = rows[0].answer === selected;
+    const { data: attempt, error: aErr } = await supabase
+      .from('quiz_attempts')
+      .select('id, answer')
+      .eq('quiz_id', quizId)
+      .eq('flashcard_id', r.flashcardId)
+      .single();
+    if (aErr || !attempt) continue;
+
+    const isCorrect = attempt.answer === r.selected;
     if (isCorrect) correctCount += 1;
 
-    await db.query(
-      'UPDATE quiz_attempts SET selected=$1, correct=$2, submitted_at=NOW() WHERE id=$3',
-      [selected, isCorrect, attemptId]
-    );
+    await supabase
+      .from('quiz_attempts')
+      .update({ selected: r.selected, correct: isCorrect, submitted_at: new Date().toISOString() })
+      .eq('id', attempt.id);
 
-    // Log review to spaced repetition using simplified quality (5 correct, 2 incorrect)
-    const quality = isCorrect ? 5 : 2;
-    await db.query(
-      'INSERT INTO review_logs (user_id, flashcard_id, quiz_id, correct) VALUES ($1,$2,$3,$4)',
-      [userId, flashcardId, quizId, isCorrect]
-    );
+    // Log review
+    await supabase
+      .from('review_logs')
+      .insert({ user_id: userId, flashcard_id: r.flashcardId, quiz_id: quizId, correct: isCorrect });
   }
 
-  await db.query('UPDATE quizzes SET completed_at=NOW(), correct_count=$1 WHERE id=$2', [correctCount, quizId]);
+  await supabase
+    .from('quizzes')
+    .update({ completed_at: new Date().toISOString(), correct_count: correctCount })
+    .eq('id', quizId);
 
   return { quizId, correctCount };
 }
 
 async function quizResults(userId, quizId) {
-  const { rows: quizRows } = await db.query('SELECT * FROM quizzes WHERE id=$1 AND user_id=$2', [quizId, userId]);
-  if (!quizRows[0]) {
+  const { data: quiz, error: qErr } = await supabase.from('quizzes')
+    .select('id, user_id, size, direction, category_id, created_at, completed_at, correct_count')
+    .eq('id', quizId)
+    .single();
+  if (qErr || !quiz || quiz.user_id !== userId) {
     const err = new Error('Quiz not found');
     err.statusCode = 404;
     throw err;
   }
-  const { rows: attempts } = await db.query(
-    'SELECT id, flashcard_id as "flashcardId", prompt, answer, selected, correct, submitted_at as "submittedAt" FROM quiz_attempts WHERE quiz_id=$1 ORDER BY id ASC',
-    [quizId]
-  );
+
+  const { data: attempts, error: aErr } = await supabase
+    .from('quiz_attempts')
+    .select('id, flashcard_id, prompt, answer, selected, correct, submitted_at')
+    .eq('quiz_id', quizId)
+    .order('id', { ascending: true });
+
+  if (aErr) throw new Error(aErr.message);
 
   return {
     quiz: {
-      id: quizRows[0].id,
-      size: quizRows[0].size,
-      direction: quizRows[0].direction,
-      categoryId: quizRows[0].category_id,
-      createdAt: quizRows[0].created_at,
-      completedAt: quizRows[0].completed_at,
-      correctCount: quizRows[0].correct_count,
+      id: quiz.id,
+      size: quiz.size,
+      direction: quiz.direction,
+      categoryId: quiz.category_id,
+      createdAt: quiz.created_at,
+      completedAt: quiz.completed_at,
+      correctCount: quiz.correct_count,
     },
-    attempts,
+    attempts: (attempts || []).map((a) => ({
+      id: a.id,
+      flashcardId: a.flashcard_id,
+      prompt: a.prompt,
+      answer: a.answer,
+      selected: a.selected,
+      correct: a.correct,
+      submittedAt: a.submitted_at,
+    })),
   };
 }
 

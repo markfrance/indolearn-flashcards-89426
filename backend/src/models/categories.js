@@ -1,38 +1,61 @@
 'use strict';
-const db = require('../config/db');
+const { supabase } = require('../config/supabase');
 const { NotFoundError } = require('../utils/errors');
 
+function mapCategory(row) {
+  return {
+    id: row.id,
+    name: row.name,
+    description: row.description || null,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
+
 async function list() {
-  const { rows } = await db.query('SELECT id, name, description, created_at as "createdAt", updated_at as "updatedAt" FROM categories ORDER BY name ASC');
-  return rows;
+  const { data, error } = await supabase
+    .from('categories')
+    .select('id, name, description, created_at, updated_at')
+    .order('name', { ascending: true });
+  if (error) throw new Error(error.message);
+  return (data || []).map(mapCategory);
 }
 
 async function getById(id) {
-  const { rows } = await db.query('SELECT id, name, description, created_at as "createdAt", updated_at as "updatedAt" FROM categories WHERE id=$1 LIMIT 1', [id]);
-  if (!rows[0]) throw new NotFoundError('Category not found');
-  return rows[0];
+  const { data, error } = await supabase
+    .from('categories')
+    .select('id, name, description, created_at, updated_at')
+    .eq('id', id)
+    .single();
+  if (error || !data) throw new NotFoundError('Category not found');
+  return mapCategory(data);
 }
 
 async function create({ name, description }) {
-  const { rows } = await db.query(
-    'INSERT INTO categories (name, description) VALUES ($1,$2) RETURNING id',
-    [name, description || null]
-  );
-  return getById(rows[0].id);
+  const { data, error } = await supabase
+    .from('categories')
+    .insert({ name, description: description || null })
+    .select('id')
+    .single();
+  if (error) throw new Error(error.message);
+  return getById(data.id);
 }
 
 async function update(id, { name, description }) {
-  const { rowCount } = await db.query(
-    'UPDATE categories SET name=COALESCE($1,name), description=COALESCE($2,description), updated_at=NOW() WHERE id=$3',
-    [name || null, description || null, id]
-  );
-  if (rowCount === 0) throw new NotFoundError('Category not found');
+  const { data, error } = await supabase
+    .from('categories')
+    .update({ name, description: description || null, updated_at: new Date().toISOString() })
+    .eq('id', id)
+    .select('id')
+    .single();
+  if (error || !data) throw new NotFoundError('Category not found');
   return getById(id);
 }
 
 async function remove(id) {
-  const { rowCount } = await db.query('DELETE FROM categories WHERE id=$1', [id]);
-  if (rowCount === 0) throw new NotFoundError('Category not found');
+  const { error, count } = await supabase.from('categories').delete({ count: 'exact' }).eq('id', id);
+  if (error) throw new Error(error.message);
+  if (!count) throw new NotFoundError('Category not found');
   return { success: true };
 }
 

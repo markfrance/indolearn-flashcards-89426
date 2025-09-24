@@ -1,7 +1,7 @@
-# IndoLearn Flashcards — Backend (Deprecated)
+# IndoLearn Flashcards — Backend
 
-This folder previously contained an Express API with PostgreSQL.
+This folder contains an Express API connected to Supabase for all authentication and data access.
+- No local PostgreSQL is used.
+- All CRUD and auth flows are backed by Supabase.
 
-Status: DEPRECATED. The app now uses Supabase exclusively and the frontend connects directly using `@supabase/supabase-js`.
-
-Refer to `assets/supabase.md` for the live schema and setup. This folder can be removed if not used in your workflows.
+See `backend/README.md` for environment variables and usage.

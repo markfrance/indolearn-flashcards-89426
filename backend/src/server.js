@@ -1,5 +1,4 @@
 const app = require('./app');
-const db = require('./config/db');
 
 const PORT = process.env.PORT || 3001;
 const HOST = process.env.HOST || '0.0.0.0';
@@ -9,14 +8,11 @@ const server = app.listen(PORT, HOST, () => {
   console.log(`Server running at http://${HOST}:${PORT}`);
 });
 
-// Graceful shutdown
+// Graceful shutdown without database pool (Supabase uses HTTP)
 async function shutdown() {
   // eslint-disable-next-line no-console
   console.log('Shutting down HTTP server...');
   await new Promise((resolve) => server.close(resolve));
-  // eslint-disable-next-line no-console
-  console.log('Closing DB pool...');
-  await db.close();
   // eslint-disable-next-line no-console
   console.log('Shutdown complete.');
   process.exit(0);

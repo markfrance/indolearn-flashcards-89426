@@ -1,77 +1,96 @@
 'use strict';
-const db = require('../config/db');
+const { supabase } = require('../config/supabase');
 const { NotFoundError } = require('../utils/errors');
 
-const BASE_SELECT = `
-SELECT 
-  f.id, f.indonesian, f.english, f.part_of_speech as "partOfSpeech",
-  f.example_sentence as "exampleSentence", f.difficulty, 
-  f.category_id as "categoryId",
-  c.name as "categoryName",
-  f.created_at as "createdAt", f.updated_at as "updatedAt"
-FROM flashcards f
-LEFT JOIN categories c ON c.id = f.category_id
-`;
+function map(row) {
+  if (!row) return null;
+  return {
+    id: row.id,
+    indonesian: row.indonesian,
+    english: row.english,
+    partOfSpeech: row.part_of_speech || null,
+    exampleSentence: row.example_sentence || null,
+    difficulty: row.difficulty,
+    categoryId: row.category_id || null,
+    categoryName: row.categories?.name || null,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
 
 async function list({ q, categoryId, partOfSpeech, limit = 50, offset = 0 }) {
-  const params = [];
-  const conds = [];
+  let query = supabase
+    .from('flashcards')
+    .select('id, indonesian, english, part_of_speech, example_sentence, difficulty, category_id, created_at, updated_at, categories(name)', { count: 'exact' });
+
   if (q) {
-    params.push(`%${q.toLowerCase()}%`);
-    conds.push('(LOWER(f.indonesian) LIKE $' + params.length + ' OR LOWER(f.english) LIKE $' + params.length + ')');
+    // Search in either language
+    query = query.or(`indonesian.ilike.%${q}%,english.ilike.%${q}%`);
   }
   if (categoryId) {
-    params.push(categoryId);
-    conds.push('f.category_id = $' + params.length);
+    query = query.eq('category_id', categoryId);
   }
   if (partOfSpeech) {
-    params.push(partOfSpeech.toLowerCase());
-    conds.push('LOWER(f.part_of_speech) = $' + params.length);
+    query = query.ilike('part_of_speech', partOfSpeech);
   }
-  const where = conds.length ? 'WHERE ' + conds.join(' AND ') : '';
-  params.push(limit);
-  params.push(offset);
-  const sql = `${BASE_SELECT} ${where} ORDER BY f.id ASC LIMIT $${params.length - 1} OFFSET $${params.length}`;
-  const { rows } = await db.query(sql, params);
-  return rows;
+
+  // Range pagination
+  const from = offset;
+  const to = offset + (limit || 50) - 1;
+  const { data, error } = await query.order('id', { ascending: true }).range(from, to);
+  if (error) throw new Error(error.message);
+  return (data || []).map(map);
 }
 
 async function getById(id) {
-  const { rows } = await db.query(`${BASE_SELECT} WHERE f.id=$1 LIMIT 1`, [id]);
-  if (!rows[0]) throw new NotFoundError('Flashcard not found');
-  return rows[0];
+  const { data, error } = await supabase
+    .from('flashcards')
+    .select('id, indonesian, english, part_of_speech, example_sentence, difficulty, category_id, created_at, updated_at, categories(name)')
+    .eq('id', id)
+    .single();
+  if (error || !data) throw new NotFoundError('Flashcard not found');
+  return map(data);
 }
 
 async function create({ indonesian, english, partOfSpeech, exampleSentence, difficulty = 1, categoryId = null }) {
-  const { rows } = await db.query(
-    `INSERT INTO flashcards (indonesian, english, part_of_speech, example_sentence, difficulty, category_id)
-     VALUES ($1,$2,$3,$4,$5,$6)
-     RETURNING id`,
-    [indonesian, english, partOfSpeech, exampleSentence || null, difficulty, categoryId]
-  );
-  return getById(rows[0].id);
+  const { data, error } = await supabase
+    .from('flashcards')
+    .insert({
+      indonesian,
+      english,
+      part_of_speech: partOfSpeech || null,
+      example_sentence: exampleSentence || null,
+      difficulty,
+      category_id: categoryId,
+    })
+    .select('id')
+    .single();
+  if (error) throw new Error(error.message);
+  return getById(data.id);
 }
 
 async function update(id, { indonesian, english, partOfSpeech, exampleSentence, difficulty, categoryId }) {
-  const { rowCount } = await db.query(
-    `UPDATE flashcards SET
-      indonesian = COALESCE($1, indonesian),
-      english = COALESCE($2, english),
-      part_of_speech = COALESCE($3, part_of_speech),
-      example_sentence = COALESCE($4, example_sentence),
-      difficulty = COALESCE($5, difficulty),
-      category_id = COALESCE($6, category_id),
-      updated_at = NOW()
-     WHERE id=$7`,
-    [indonesian || null, english || null, partOfSpeech || null, exampleSentence || null, difficulty || null, categoryId || null, id]
-  );
-  if (rowCount === 0) throw new NotFoundError('Flashcard not found');
+  const patch = {
+    indonesian,
+    english,
+    part_of_speech: partOfSpeech,
+    example_sentence: exampleSentence,
+    difficulty,
+    category_id: categoryId,
+    updated_at: new Date().toISOString(),
+  };
+  // Remove undefined keys
+  Object.keys(patch).forEach((k) => patch[k] === undefined && delete patch[k]);
+
+  const { data, error } = await supabase.from('flashcards').update(patch).eq('id', id).select('id').single();
+  if (error || !data) throw new NotFoundError('Flashcard not found');
   return getById(id);
 }
 
 async function remove(id) {
-  const { rowCount } = await db.query('DELETE FROM flashcards WHERE id=$1', [id]);
-  if (rowCount === 0) throw new NotFoundError('Flashcard not found');
+  const { error, count } = await supabase.from('flashcards').delete({ count: 'exact' }).eq('id', id);
+  if (error) throw new Error(error.message);
+  if (!count) throw new NotFoundError('Flashcard not found');
   return { success: true };
 }
 

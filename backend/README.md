@@ -1,11 +1,27 @@
-# DEPRECATED: Express Backend
+# IndoLearn Flashcards — Express Backend (Supabase)
 
-This project previously used an Express + PostgreSQL backend. The architecture has been migrated to Supabase as the sole database and auth provider, and the frontend (Next.js) connects directly to Supabase using `@supabase/supabase-js`.
+This backend no longer uses a local PostgreSQL connection. All data access and authentication are performed via Supabase.
 
-- Do not start or deploy this backend. Any container attempting to start this service without database and JWT env vars will fail by design.
-- API calls from the frontend have been replaced with direct Supabase queries and auth.
-- Quizzes and stats are currently handled on the client; optional server-side persistence can be added in Supabase.
+What changed:
+- Removed pg pool and all direct SQL usage
+- Integrated `@supabase/supabase-js` server client
+- Auth endpoints proxy to Supabase Auth (signUp/signIn)
+- CRUD for users, categories, flashcards, quizzes, stats now use Supabase tables
 
-For current database schema and configuration, see `assets/supabase.md` at the repository root.
+Environment variables (set in your runtime, do not commit secrets):
+- SUPABASE_URL
+- SUPABASE_SERVICE_ROLE_KEY
+- SUPABASE_JWT_SECRET (optional, only if you plan to verify JWTs locally)
+- SITE_URL (optional; used as emailRedirectTo for signUp)
+- HOST (default 0.0.0.0)
+- PORT (default 3001)
 
-You can safely remove this backend folder if not needed by your workflows.
+Quick start:
+1) Set env vars
+2) npm install
+3) npm start
+4) Open Swagger docs at /docs
+
+Security notes:
+- Never expose SERVICE_ROLE_KEY to the browser.
+- Frontend should use NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_ANON_KEY.

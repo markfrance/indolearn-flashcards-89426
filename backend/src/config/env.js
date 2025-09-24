@@ -1,6 +1,6 @@
 'use strict';
 /**
- * Environment configuration loader.
+ * Environment configuration loader for Supabase-backed API.
  * Reads environment variables and exposes them in a typed way.
  * Note: Do not write the .env file directly; variables are expected to be provided by the environment.
  */
@@ -12,24 +12,21 @@ const config = {
     env: process.env.NODE_ENV || 'development',
     host: process.env.HOST || '0.0.0.0',
     port: parseInt(process.env.PORT || '3001', 10),
-    jwtSecret: process.env.JWT_SECRET, // REQUIRED - must be provided by environment
-    jwtExpiresIn: process.env.JWT_EXPIRES_IN || '7d',
+    // Optional site URL used for email redirect in Supabase signUp flows
+    siteUrl: process.env.SITE_URL || '',
   },
-  db: {
-    // PostgreSQL connection through URL preferred; alternatively, use discrete vars.
-    url: process.env.POSTGRES_URL || null,
-    user: process.env.POSTGRES_USER || null,
-    password: process.env.POSTGRES_PASSWORD || null,
-    database: process.env.POSTGRES_DB || null,
-    port: process.env.POSTGRES_PORT ? parseInt(process.env.POSTGRES_PORT, 10) : null,
-    host: process.env.POSTGRES_HOST || 'localhost',
-    ssl: (process.env.POSTGRES_SSL || 'false').toLowerCase() === 'true',
+  supabase: {
+    url: process.env.SUPABASE_URL || '',
+    serviceRoleKey: process.env.SUPABASE_SERVICE_ROLE_KEY || '',
+    // Optional: If you want to validate JWTs locally instead of calling Supabase
+    jwtSecret: process.env.SUPABASE_JWT_SECRET || '',
   },
 };
 
-if (!config.app.jwtSecret) {
+// Basic validation to surface misconfiguration early
+if (!config.supabase.url || !config.supabase.serviceRoleKey) {
   // eslint-disable-next-line no-console
-  console.warn('WARNING: JWT_SECRET is not set. Authentication will not work properly.');
+  console.warn('WARNING: SUPABASE_URL and/or SUPABASE_SERVICE_ROLE_KEY are not set. API will not be able to access data.');
 }
 
 module.exports = config;
