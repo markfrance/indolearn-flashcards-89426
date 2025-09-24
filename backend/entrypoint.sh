@@ -5,7 +5,10 @@ set -e
 # Some orchestrations or compose files may attempt to 'cat *.env' to print env vars.
 # If no files match, BusyBox/ash will error and, with set -e, would terminate the script.
 # We proactively run it and suppress errors to ensure this never stops container startup.
-cat *.env 2>/dev/null || true
+# Avoid printing or touching non-existent .env files here.
+# Node will load .env via dotenv within the app if present.
+# This prevents noisy "cat: *.env: No such file or directory" messages in logs.
+true
 
 # Do NOT attempt to export variables by parsing .env here (values may contain spaces/quotes).
 # Node will load .env via dotenv inside the app for correctness and consistency.
