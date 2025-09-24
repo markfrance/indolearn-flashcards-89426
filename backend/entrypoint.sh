@@ -7,16 +7,8 @@ set -e
 # We proactively run it and suppress errors to ensure this never stops container startup.
 cat *.env 2>/dev/null || true
 
-# Optional: if a .env file exists in the container, export it. If it doesn't, continue gracefully.
-if [ -f ".env" ]; then
-  # shellcheck disable=SC2046
-  export $(grep -v '^#' .env | xargs) || true
-fi
-
-# Warn if critical env vars are missing (info only; server will still start and show warnings)
-if [ -z "${SUPABASE_URL:-}" ] || [ -z "${SUPABASE_SERVICE_ROLE_KEY:-}" ]; then
-  echo "WARNING: SUPABASE_URL and/or SUPABASE_SERVICE_ROLE_KEY are not set. API endpoints depending on Supabase will not function." >&2
-fi
+# Do NOT attempt to export variables by parsing .env here (values may contain spaces/quotes).
+# Node will load .env via dotenv inside the app for correctness and consistency.
 
 # Defensive guard: if node is unexpectedly missing, keep container alive for diagnostics instead of crash-looping.
 if ! command -v node >/dev/null 2>&1; then
@@ -24,5 +16,5 @@ if ! command -v node >/dev/null 2>&1; then
   tail -f /dev/null
 fi
 
-# Start the server
+# Start the server (dotenv will load .env; missing Supabase vars are logged by the app but do not prevent startup)
 exec node src/server.js

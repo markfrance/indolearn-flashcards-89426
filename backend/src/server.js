@@ -1,7 +1,9 @@
+require('dotenv').config(); // Load .env before any env access
 const app = require('./app');
+const config = require('./config/env'); // Triggers early validation/warnings for Supabase keys
 
-const PORT = process.env.PORT || 3001;
-const HOST = process.env.HOST || '0.0.0.0';
+const PORT = config.app.port;
+const HOST = config.app.host;
 
 const server = app.listen(PORT, HOST, () => {
   // eslint-disable-next-line no-console

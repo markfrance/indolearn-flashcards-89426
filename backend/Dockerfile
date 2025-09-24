@@ -18,9 +18,9 @@ EXPOSE 3001
 RUN addgroup -S appgroup && adduser -S appuser -G appgroup
 USER appuser
 
-# Healthcheck (optional): ping the health endpoint
+# Healthcheck (optional): ping the health endpoint using Node (no external tools required)
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
-  CMD wget -qO- http://localhost:3001/ || exit 1
+  CMD node -e "require('http').get('http://localhost:3001/', r => { process.exit(r.statusCode === 200 ? 0 : 1); }).on('error', () => process.exit(1));"
 
 # Entrypoint ensures graceful start (no need for local .env file)
 ENTRYPOINT ["sh", "./entrypoint.sh"]
